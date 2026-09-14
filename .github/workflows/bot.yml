@@ -1,6 +1,8 @@
 name: Reddit Video Editor Bot
 
 on:
+  push:
+    branches: [master]
   workflow_dispatch:
   schedule:
     - cron: '0 */2 * * *'
