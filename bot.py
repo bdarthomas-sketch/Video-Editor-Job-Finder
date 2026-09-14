@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import re
 import feedparser
 import pyfiglet
 import requests
@@ -12,17 +13,20 @@ init(autoreset=True)
 
 load_dotenv()
 
-TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
-TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+    print("❌ ERROR: Faltan variables de entorno TELEGRAM_TOKEN y/o TELEGRAM_CHAT_ID.")
+    exit(1)
 
 SUBREDDITS_EN = ["forhire", "VideoEditing", "editors", "HireAnEditor", "freelance_forhire", "DesignJobs", "RemoteJobs"]
-SUBREDDITS_ES = ["empleos_AR", "TrabajoArgentina", "argentina", "AskArgentina"]
+SUBREDDITS_ES = ["empleos_AR", "TrabajoArgentina"]
 
 KEYWORDS = ["video editor", "video editing", "editor de video"]
 
 EXCLUDE_LEVEL = ["senior", "expert", "advanced", "avanzado"]
-REMOTE_KEYWORDS = ["remote", "remoto", "work from home", "online"]
-PAY_KEYWORDS = ["usd", "crypto", "bitcoin", "eth", "usdt", "$"]
+REMOTE_KEYWORDS = ["remote", "remoto", "work from home", "online", "freelance", "anywhere", "worldwide"]
+PAY_KEYWORDS = ["usd", "crypto", "bitcoin", "eth", "usdt", "$", "dollars", "per hour", "hourly", "payment", "paid", "pago"]
 
 SEEN_FILE = "seen_ids.json"
 
@@ -45,7 +49,9 @@ def save_seen(seen):
 
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"})
+    resp = requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"})
+    if not resp.ok:
+        print(f"{Fore.RED}  ⚠ Telegram error {resp.status_code}: {resp.text}{Style.RESET_ALL}")
 
 
 def passes_filters(title, body, is_en):
@@ -127,14 +133,15 @@ def format_post(post):
         created = datetime.strptime(post["published"], "%a, %d %b %Y %H:%M:%S %z").strftime("%d/%m/%Y")
     except (ValueError, KeyError):
         created = "?"
-    body = post.get("summary", "")[:300].replace("\n", " ")
-    title = post["title"].replace("[", "\\[").replace("]", "\\]")
-    body = body.replace("[", "\\[").replace("]", "\\]")
+    body = re.sub(r"<[^>]+>", " ", post.get("summary", ""))[:300]
+    body = " ".join(body.split())
+    title = post["title"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    body = body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     return (
-        f"*{title}*\n"
+        f"<b>{title}</b>\n"
         f"r/{post['subreddit']} · {created}\n"
         f"{body}\n\n"
-        f"[Ver post]({post['link']})"
+        f"<a href=\"{post['link']}\">Ver post</a>"
     )
 
 
@@ -190,12 +197,18 @@ def run_cycle(seen):
         time.sleep(15)
 
     save_seen(seen)
+
+    if sent_count == 0:
+        send_telegram("✅ Búsqueda completada. Sin nuevos posts.")
+    else:
+        send_telegram(f"✅ Búsqueda completada. {sent_count} posts enviados.")
+
     print(f"\n✔ Búsqueda completada. {sent_count} posts enviados.")
     return sent_count
 
 
 def main():
-    banner = pyfiglet.figlet_format("V1d30Edit0r Job Finder", font="slant")
+    banner = pyfiglet.figlet_format("Video Job Finder", font="slant")
     print(f"\033[38;5;208m{banner}\033[0m")
 
     seen = load_seen()
