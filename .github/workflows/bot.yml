@@ -1,0 +1,41 @@
+name: Reddit Video Editor Bot
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */2 * * *'
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout del repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Restaurar caché de seen_ids
+        uses: actions/cache@v4
+        with:
+          path: seen_ids.json
+          key: seen-ids-cache
+          restore-keys: seen-ids-
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Correr bot
+        run: python bot.py
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Guardar caché de seen_ids
+        uses: actions/cache@v4
+        with:
+          path: seen_ids.json
+          key: seen-ids-${{ github.run_id }}
