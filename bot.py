@@ -199,12 +199,16 @@ def main():
     print(f"\033[38;5;208m{banner}\033[0m")
 
     seen = load_seen()
+    in_github = os.environ.get("GITHUB_ACTIONS") == "true"
 
     try:
-        while True:
+        if in_github:
             run_cycle(seen)
-            print(f"\n⏳ Próxima búsqueda en 60 minutos...")
-            time.sleep(3600)
+        else:
+            while True:
+                run_cycle(seen)
+                print(f"\n⏳ Próxima búsqueda en 60 minutos...")
+                time.sleep(3600)
     except KeyboardInterrupt:
         print(f"\n👋 Bot detenido.")
 
