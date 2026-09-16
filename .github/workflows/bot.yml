@@ -5,7 +5,7 @@ on:
     branches: [master]
   workflow_dispatch:
   schedule:
-    - cron: '0 */2 * * *'
+    - cron: '*/10 * * * *'
 
 jobs:
   run-bot:
@@ -15,7 +15,7 @@ jobs:
       - name: Checkout del repo
         uses: actions/checkout@v4
 
-      - name: Setup Python 3.11
+      - name: Setup Py  thon 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"

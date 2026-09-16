@@ -1,0 +1,10 @@
+README.md
+bot.py
+keywords.py
+pyproject.toml
+video_bot.egg-info/PKG-INFO
+video_bot.egg-info/SOURCES.txt
+video_bot.egg-info/dependency_links.txt
+video_bot.egg-info/entry_points.txt
+video_bot.egg-info/requires.txt
+video_bot.egg-info/top_level.txt

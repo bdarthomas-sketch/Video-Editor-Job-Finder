@@ -8,6 +8,12 @@ import requests
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 from colorama import init, Fore, Style
+from keywords import (
+    JOB_KEYWORDS, VIDEO_EDITING_KEYWORDS, REMOTE_KEYWORDS,
+    PAY_KEYWORDS, SPANISH_INDICATORS, ENGLISH_BASIC_INDICATORS,
+    VALID_LEVEL_KEYWORDS, EXCLUDE_LEVEL, EXCLUDE_TOPICS,
+    NON_VIDEO_JOB_KEYWORDS, SCORE, MIN_SCORE
+)
 
 init(autoreset=True)
 
@@ -19,14 +25,8 @@ if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
     print("❌ ERROR: Faltan variables de entorno TELEGRAM_TOKEN y/o TELEGRAM_CHAT_ID.")
     exit(1)
 
-SUBREDDITS_EN = ["forhire", "VideoEditing", "editors", "HireAnEditor", "freelance_forhire", "DesignJobs", "RemoteJobs"]
+SUBREDDITS_EN = ["forhire", "VideoEditing", "HireAnEditor", "freelance_forhire", "DesignJobs", "RemoteJobs"]
 SUBREDDITS_ES = ["empleos_AR", "TrabajoArgentina"]
-
-KEYWORDS = ["video editor", "video editing", "editor de video"]
-
-EXCLUDE_LEVEL = ["senior", "expert", "advanced", "avanzado"]
-REMOTE_KEYWORDS = ["remote", "remoto", "work from home", "online", "freelance", "anywhere", "worldwide"]
-PAY_KEYWORDS = ["usd", "crypto", "bitcoin", "eth", "usdt", "$", "dollars", "per hour", "hourly", "payment", "paid", "pago"]
 
 SEEN_FILE = "seen_ids.json"
 
@@ -54,33 +54,45 @@ def send_telegram(text):
         print(f"{Fore.RED}  ⚠ Telegram error {resp.status_code}: {resp.text}{Style.RESET_ALL}")
 
 
-def passes_filters(title, body, is_en):
+def score_post(title, body, is_english_sub):
     text = (title + " " + body).lower()
+    score = 0
+    matches = []
 
-    if is_en and not any(w in text for w in ["spanish", "español"]):
-        return "sub EN sin 'spanish'/'español'"
+    categories = [
+        ("job", JOB_KEYWORDS, SCORE["job"]),
+        ("video_editing", VIDEO_EDITING_KEYWORDS, SCORE["video_editing"]),
+        ("remote", REMOTE_KEYWORDS, SCORE["remote"]),
+        ("pay", PAY_KEYWORDS, SCORE["pay"]),
+        ("spanish", SPANISH_INDICATORS, SCORE["spanish"]),
+        ("english", ENGLISH_BASIC_INDICATORS, SCORE["english"]),
+        ("valid_level", VALID_LEVEL_KEYWORDS, SCORE["valid_level"]),
+        ("exclude_level", EXCLUDE_LEVEL, SCORE["exclude_level"]),
+        ("exclude_topic", EXCLUDE_TOPICS, SCORE["exclude_topic"]),
+        ("non_video_job", NON_VIDEO_JOB_KEYWORDS, SCORE["non_video_job"]),
+    ]
 
-    if not any(kw in text for kw in KEYWORDS):
-        return "sin keyword relevante"
+    for name, keywords, pts in categories:
+        matched = next((kw for kw in keywords if kw in text), None)
+        if matched:
+            score += pts
+            matches.append((pts, name, matched))
 
-    if not any(w in text for w in REMOTE_KEYWORDS):
-        return "sin keyword remoto"
+    if is_english_sub and not any(kw in text for kw in SPANISH_INDICATORS) and not any(kw in text for kw in ENGLISH_BASIC_INDICATORS):
+        return 0
 
-    if not any(w in text for w in PAY_KEYWORDS):
-        return "sin mención de pago"
+    # ponytail: debug temporal — quitar cuando no haga falta más
+    if not is_english_sub and score < 0:
+        for pts, name, kw in matches:
+            sign = "+" if pts > 0 else ""
+            print(f"  [DEBUG] {sign}{pts} {name}: \"{kw}\"")
 
-    if any(w in text for w in EXCLUDE_LEVEL):
-        return "nivel excluido"
-
-    if title.lower().startswith("[for hire]") or title.lower().startswith("[available]"):
-        return "post [For Hire]"
-
-    return None
+    return score
 
 
 def fetch_subreddit_new(subreddit):
-    url = f"https://www.reddit.com/r/{subreddit}/new.rss"
-    params = {"limit": "50"}
+    url = f"https://www.reddit.com/r/{subreddit}/search.rss"
+    params = {"q": "video+editor", "sort": "new", "restrict_sr": "on", "limit": "25"}
     resp = requests.get(url, headers=HEADERS, params=params, timeout=15)
     if resp.status_code == 429:
         time.sleep(30)
@@ -104,8 +116,8 @@ def fetch_subreddit_new(subreddit):
 
 
 def fetch_global_search(keyword):
-    url = "https://www.reddit.com/search.rss"
-    params = {"q": keyword, "sort": "new", "limit": "50"}
+    url = "https://www.reddit.com/r/all/search.rss"
+    params = {"q": keyword, "sort": "new", "restrict_sr": "on", "limit": "25"}
     resp = requests.get(url, headers=HEADERS, params=params, timeout=15)
     if resp.status_code == 429:
         time.sleep(30)
@@ -123,7 +135,7 @@ def fetch_global_search(keyword):
             "link": entry.get("link", ""),
             "summary": summary,
             "published": entry.get("published", ""),
-            "subreddit": "global",
+            "subreddit": "r/all",
         })
     return results
 
@@ -161,11 +173,11 @@ def run_cycle(seen):
                 if pid in seen:
                     print(f"  ❌ {p['title'][:60]} — ya visto")
                     continue
-                reason = passes_filters(p["title"], p["summary"], is_en)
-                if reason:
-                    print(f"  ❌ {p['title'][:60]} — {reason}")
+                s = score_post(p["title"], p["summary"], is_en)
+                if s < MIN_SCORE:
+                    print(f"  ❌ Score {s}: {p['title'][:60]} — descartado")
                     continue
-                print(f"  {Fore.GREEN}✅ Encontrado: {p['title'][:60]}{Style.RESET_ALL}")
+                print(f"  {Fore.GREEN}✅ Score {s}: {p['title'][:60]}{Style.RESET_ALL}")
                 seen.add(pid)
                 send_telegram(format_post(p))
                 sent_count += 1
@@ -174,8 +186,9 @@ def run_cycle(seen):
             print(f"{Fore.RED}Error en r/{sub}: {e}{Style.RESET_ALL}")
         time.sleep(15)
 
-    for kw in KEYWORDS:
-        print(f"{Fore.YELLOW}📡 Revisando búsqueda global: {kw}...{Style.RESET_ALL}")
+    global_keywords = ["video editor", "video editing", "editor de video"]
+    for kw in global_keywords:
+        print(f"{Fore.YELLOW}📡 Buscando en r/all: {kw}...{Style.RESET_ALL}")
         try:
             posts = fetch_global_search(kw)
             for p in posts:
@@ -183,11 +196,11 @@ def run_cycle(seen):
                 if pid in seen:
                     print(f"  ❌ {p['title'][:60]} — ya visto")
                     continue
-                reason = passes_filters(p["title"], p["summary"], True)
-                if reason:
-                    print(f"  ❌ {p['title'][:60]} — {reason}")
+                s = score_post(p["title"], p["summary"], True)
+                if s < MIN_SCORE:
+                    print(f"  ❌ Score {s}: {p['title'][:60]} — descartado")
                     continue
-                print(f"  {Fore.GREEN}✅ Encontrado: {p['title'][:60]}{Style.RESET_ALL}")
+                print(f"  {Fore.GREEN}✅ Score {s}: {p['title'][:60]}{Style.RESET_ALL}")
                 seen.add(pid)
                 send_telegram(format_post(p))
                 sent_count += 1
